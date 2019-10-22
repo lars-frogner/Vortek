@@ -61,6 +61,9 @@ impl<B: Backend> RenderPassState<B> {
             .expect("No render pass in render pass state.")
     }
 
+    /// Creates a simple image attachement description for the given format,
+    /// which clears the attachement at the beginning of the subpass and
+    /// preserves the data written to the attachement during the subpass.
     fn create_attachement(format: Format) -> Attachment {
         Attachment {
             format: Some(format),
@@ -74,6 +77,8 @@ impl<B: Backend> RenderPassState<B> {
         }
     }
 
+    /// Creates a simple subpass description which uses a color buffer with
+    /// the optimal layout.
     fn create_subpass_description() -> SubpassDesc<'static> {
         SubpassDesc {
             colors: &[(0, Layout::ColorAttachmentOptimal)],
@@ -84,6 +89,7 @@ impl<B: Backend> RenderPassState<B> {
         }
     }
 
+    /// Creates a subpass dependency description.
     fn create_subpass_dependency() -> SubpassDependency {
         SubpassDependency {
             passes: SubpassRef::External..SubpassRef::Pass(0),

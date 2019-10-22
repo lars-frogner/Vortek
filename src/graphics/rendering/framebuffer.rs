@@ -10,7 +10,7 @@ use gfx_hal::{
     format::{Aspects, Format, Swizzle},
     image::{Extent, SubresourceRange, ViewKind},
     pool::{CommandPool, CommandPoolCreateFlags},
-    queue::QueueFamilyId,
+    queue::{QueueFamily, QueueFamilyId},
     window::SwapImageIndex,
     Backend, Graphics,
 };
@@ -62,7 +62,7 @@ impl<B: Backend> FramebufferState<B> {
 
         let (command_pools, command_buffer_lists) = Self::create_command_pools_and_buffers(
             device_state.borrow().device(),
-            device_state.borrow().queue_group().family(),
+            device_state.borrow().queue_family().id(),
             number_of_frames,
         )?;
 
@@ -238,6 +238,7 @@ impl<B: Backend> FramebufferState<B> {
         current_semaphore_index
     }
 
+    /// Creates a simple color image view for each given image of the swapchain backbuffer.
     unsafe fn create_image_views(
         device: &B::Device,
         format: Format,
@@ -248,7 +249,6 @@ impl<B: Backend> FramebufferState<B> {
             levels: 0..1,
             layers: 0..1,
         };
-
         images
             .iter()
             .map(|image| {
@@ -270,6 +270,7 @@ impl<B: Backend> FramebufferState<B> {
             .collect::<VortekResult<Vec<_>>>()
     }
 
+    /// Creates a framebuffer with the given extent and render pass from each given image view.
     unsafe fn create_framebuffers(
         device: &B::Device,
         render_pass: &B::RenderPass,
@@ -301,6 +302,7 @@ impl<B: Backend> FramebufferState<B> {
             .collect::<Result<Vec<_>, VortekError>>()
     }
 
+    /// Creates the given number of new fences.
     fn create_fences(device: &B::Device, number: usize) -> VortekResult<Vec<B::Fence>> {
         let mut fences = Vec::with_capacity(number);
         for _ in 0..number {
@@ -314,6 +316,7 @@ impl<B: Backend> FramebufferState<B> {
         Ok(fences)
     }
 
+    /// Creates the given number of new semaphores.
     fn create_semaphores(device: &B::Device, number: usize) -> VortekResult<Vec<B::Semaphore>> {
         let mut semaphores = Vec::with_capacity(number);
         for _ in 0..number {
@@ -327,6 +330,11 @@ impl<B: Backend> FramebufferState<B> {
         Ok(semaphores)
     }
 
+    /// Creates the given number of command pools and empty command buffer lists
+    /// for the given command queue family.
+    ///
+    /// # Safety
+    /// The queue family has to be supported by the logical device.
     #[allow(clippy::type_complexity)]
     unsafe fn create_command_pools_and_buffers(
         device: &B::Device,

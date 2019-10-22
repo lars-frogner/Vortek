@@ -24,6 +24,8 @@ impl<B: Backend> AdapterState<B> {
         self.adapter.take().expect("No adapter in adapter state.")
     }
 
+    /// Selects the first available adapter with a queue family that supports graphics
+    /// and is supported by the surface.
     fn select_adapter(adapters: Vec<Adapter<B>>, surface: &B::Surface) -> VortekResult<Adapter<B>> {
         adapters
             .into_iter()

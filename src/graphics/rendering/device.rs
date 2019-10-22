@@ -8,27 +8,37 @@ use gfx_hal::{
     window::Surface,
     Backend, Features, Gpu, Graphics,
 };
+use log::debug;
 
 /// Structure for managing device state.
 pub struct DeviceState<B: Backend> {
     device: B::Device,
     physical_device: B::PhysicalDevice,
+    queue_family: B::QueueFamily,
     queue_group: QueueGroup<B, Graphics>,
 }
 
 impl<B: Backend> DeviceState<B> {
     /// Creates a new device state from the given adapter.
     pub fn new(adapter: Adapter<B>, surface: &B::Surface) -> VortekResult<Self> {
-        let queue_family = Self::select_queue_family(&adapter.queue_families, surface)?;
+        let Adapter {
+            info,
+            physical_device,
+            queue_families,
+        } = adapter;
+        debug!("Adapter: {:?}", info);
 
-        let Gpu { device, mut queues } =
-            unsafe { Self::create_logical_device(&adapter.physical_device, queue_family)? };
+        let queue_family = Self::take_queue_family(queue_families, surface)?;
 
-        let queue_group = Self::take_queue_group(&mut queues, queue_family)?;
+        let Gpu { device, queues } =
+            unsafe { Self::create_logical_device(&physical_device, &queue_family)? };
+
+        let queue_group = Self::take_queue_group(queues, &queue_family)?;
 
         Ok(Self {
             device,
-            physical_device: adapter.physical_device,
+            physical_device,
+            queue_family,
             queue_group,
         })
     }
@@ -43,6 +53,11 @@ impl<B: Backend> DeviceState<B> {
         &self.physical_device
     }
 
+    /// Returns a reference to the queue family held by the device state.
+    pub fn queue_family(&self) -> &B::QueueFamily {
+        &self.queue_family
+    }
+
     /// Returns a reference to the queue group held by the device state.
     pub fn queue_group(&self) -> &QueueGroup<B, Graphics> {
         &self.queue_group
@@ -53,13 +68,15 @@ impl<B: Backend> DeviceState<B> {
         &mut self.queue_group
     }
 
-    fn select_queue_family<'a, 'b>(
-        queue_families: &'a [<B as Backend>::QueueFamily],
-        surface: &'b B::Surface,
-    ) -> VortekResult<&'a <B as Backend>::QueueFamily> {
+    /// Takes and returns the first available queue family that supports graphics
+    /// and is supported by the surface.
+    fn take_queue_family(
+        queue_families: Vec<<B as Backend>::QueueFamily>,
+        surface: &B::Surface,
+    ) -> VortekResult<<B as Backend>::QueueFamily> {
         queue_families
-            .iter()
-            .find(|family| surface.supports_queue_family(family) && family.supports_graphics())
+            .into_iter()
+            .find(|family| family.supports_graphics() && surface.supports_queue_family(family))
             .ok_or_else(|| {
                 VortekError::RenderingError(RenderingError::from_str(
                     "Could not find supported queue family with graphics.",
@@ -67,6 +84,11 @@ impl<B: Backend> DeviceState<B> {
             })
     }
 
+    /// Creates a new logical device from the given physical device and queue
+    /// family, with only core features supported.
+    ///
+    /// # Safety
+    /// The physical device and queue family must be compatible.
     unsafe fn create_logical_device(
         physical_device: &<B as Backend>::PhysicalDevice,
         queue_family: &<B as Backend>::QueueFamily,
@@ -81,8 +103,10 @@ impl<B: Backend> DeviceState<B> {
             })
     }
 
+    /// Takes and returns the queue group of the given family from the given list
+    /// of queues associated with a logical device.
     fn take_queue_group(
-        queues: &mut Queues<B>,
+        mut queues: Queues<B>,
         queue_family: &<B as Backend>::QueueFamily,
     ) -> VortekResult<QueueGroup<B, Graphics>> {
         let queue_group = queues.take::<Graphics>(queue_family.id()).ok_or_else(|| {

@@ -13,7 +13,7 @@ use gfx_hal::{
     },
     Backend,
 };
-use log::info;
+use log::debug;
 use std::{cell::RefCell, cmp, ops::Drop, rc::Rc};
 
 /// Structure for managing swapchain state.
@@ -27,16 +27,16 @@ pub struct SwapchainState<B: Backend> {
 
 impl<B: Backend> SwapchainState<B> {
     /// Creates a new swapchain state from the given backend and device states.
-    pub unsafe fn new(
+    pub fn new(
         device_state: Rc<RefCell<DeviceState<B>>>,
         backend_state: &mut BackendState<B>,
     ) -> VortekResult<Self> {
         let (capabilities, preferred_formats, present_modes) = backend_state
             .surface()
             .compatibility(device_state.borrow().physical_device());
-        info!("Surface capabilities: {:?}", capabilities);
-        info!("Preferred formats: {:?}", preferred_formats);
-        info!("Present modes: {:?}", present_modes);
+        debug!("Surface capabilities: {:?}", capabilities);
+        debug!("Preferred formats: {:?}", preferred_formats);
+        debug!("Present modes: {:?}", present_modes);
 
         let present_mode = Self::select_present_mode(&present_modes)?;
         let composite_alpha = Self::select_composite_alpha(&capabilities)?;
@@ -55,18 +55,24 @@ impl<B: Backend> SwapchainState<B> {
             image_layers,
             image_usage,
         };
-        info!("{:?}", swapchain_config);
+        debug!("{:?}", swapchain_config);
 
-        let (swapchain, backbuffer) = device_state
-            .borrow()
-            .device()
-            .create_swapchain(backend_state.surface_mut(), swapchain_config, None)
-            .map_err(|err| {
-                VortekError::RenderingError(RenderingError::from_error(
-                    "Could not create swapchain: ",
-                    err,
-                ))
-            })?;
+        assert!(backend_state
+            .surface()
+            .supports_queue_family(device_state.borrow().queue_family()));
+
+        let (swapchain, backbuffer) = unsafe {
+            device_state
+                .borrow()
+                .device()
+                .create_swapchain(backend_state.surface_mut(), swapchain_config, None)
+                .map_err(|err| {
+                    VortekError::RenderingError(RenderingError::from_error(
+                        "Could not create swapchain: ",
+                        err,
+                    ))
+                })?
+        };
 
         Ok(Self {
             swapchain: Some(swapchain),
@@ -108,6 +114,8 @@ impl<B: Backend> SwapchainState<B> {
             .expect("No backbuffer in swapchain state.")
     }
 
+    /// Selects the preferred present mode for the given list of available present
+    /// modes.
     fn select_present_mode(present_modes: &[PresentMode]) -> VortekResult<PresentMode> {
         [
             PresentMode::Mailbox,
@@ -123,6 +131,8 @@ impl<B: Backend> SwapchainState<B> {
         })
     }
 
+    /// Selects the preferred composite alpha mode for the given list of available
+    /// composite alpha modes.
     fn select_composite_alpha(capabilities: &SurfaceCapabilities) -> VortekResult<CompositeAlpha> {
         [
             CompositeAlpha::OPAQUE,
@@ -140,6 +150,8 @@ impl<B: Backend> SwapchainState<B> {
         })
     }
 
+    /// Tries to select an SRGB format from the given list of preferred formats,
+    /// or falls back to the first format in the list.
     fn select_format(preferred_formats: Option<&Vec<Format>>) -> VortekResult<Format> {
         preferred_formats.map_or(Ok(Format::Rgba8Srgb), |formats| {
             match formats
@@ -157,6 +169,8 @@ impl<B: Backend> SwapchainState<B> {
         })
     }
 
+    /// Determines the swapchain extent to use by clamping the window extent to
+    /// lie between the supported extents.
     fn determine_extent(
         window_state: &WindowState,
         capabilities: &SurfaceCapabilities,
@@ -180,6 +194,8 @@ impl<B: Backend> SwapchainState<B> {
         }))
     }
 
+    /// Computes the number of images to use in the swapchain based on the present mode
+    /// and supported number of images.
     fn compute_image_count(capabilities: &SurfaceCapabilities, present_mode: PresentMode) -> u32 {
         cmp::min(
             *capabilities.image_count.end(),
@@ -194,6 +210,8 @@ impl<B: Backend> SwapchainState<B> {
         )
     }
 
+    /// Specifies that the images should be used as color attachments,
+    /// or returns an error if this is not possible.
     fn select_image_usage(capabilities: &SurfaceCapabilities) -> VortekResult<Usage> {
         if capabilities.usage.contains(Usage::COLOR_ATTACHMENT) {
             Ok(Usage::COLOR_ATTACHMENT)

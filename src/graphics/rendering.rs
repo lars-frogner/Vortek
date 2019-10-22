@@ -67,7 +67,7 @@ impl RenderingError {
 
 impl<B: Backend> RendererState<B> {
     /// Creates a new renderer state from the given backend state.
-    pub unsafe fn new(mut backend_state: BackendState<B>) -> VortekResult<Self> {
+    pub fn new(mut backend_state: BackendState<B>) -> VortekResult<Self> {
         let device_state = Rc::new(RefCell::new(DeviceState::new(
             backend_state.adapter_state_mut().take_adapter(),
             backend_state.surface(),
@@ -76,13 +76,16 @@ impl<B: Backend> RendererState<B> {
         let mut swapchain_state =
             SwapchainState::new(Rc::clone(&device_state), &mut backend_state)?;
 
-        let render_pass_state = RenderPassState::new(Rc::clone(&device_state), &swapchain_state)?;
+        let render_pass_state =
+            unsafe { RenderPassState::new(Rc::clone(&device_state), &swapchain_state)? };
 
-        let framebuffer_state = FramebufferState::new(
-            Rc::clone(&device_state),
-            &mut swapchain_state,
-            &render_pass_state,
-        )?;
+        let framebuffer_state = unsafe {
+            FramebufferState::new(
+                Rc::clone(&device_state),
+                &mut swapchain_state,
+                &render_pass_state,
+            )?
+        };
 
         let viewport = Self::create_viewport(swapchain_state.extent());
 
@@ -122,6 +125,8 @@ impl<B: Backend> RendererState<B> {
             {
                 Ok((swap_image_index, _)) => swap_image_index,
                 Err(_) => {
+                    // Resizing the window will make the current swapchain obsolete,
+                    // so we have to recreate it when this happens.
                     warn!("Could not acquire image.");
                     self.recreate_swapchain = true;
                     return Ok(());
@@ -202,6 +207,8 @@ impl<B: Backend> RendererState<B> {
                 )
                 .is_err()
             {
+                // Resizing the window will make the current swapchain obsolete,
+                // so we have to recreate it when this happens.
                 warn!("Could not present image.");
                 self.recreate_swapchain = true;
                 return Ok(());
@@ -229,9 +236,10 @@ impl<B: Backend> RendererState<B> {
             .take()
             .expect("No swapchain state in renderer state.");
 
-        self.swapchain_state = Some(unsafe {
-            SwapchainState::new(Rc::clone(&self.device_state), &mut self.backend_state)?
-        });
+        self.swapchain_state = Some(SwapchainState::new(
+            Rc::clone(&self.device_state),
+            &mut self.backend_state,
+        )?);
 
         self.render_pass_state = unsafe {
             RenderPassState::new(
