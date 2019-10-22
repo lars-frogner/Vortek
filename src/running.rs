@@ -25,12 +25,10 @@ pub fn run() {
             error!("Could not initialize backend: {}", err);
             process::exit(1);
         });
-    let mut renderer_state = unsafe {
-        RendererState::new(backend_state).unwrap_or_else(|err| {
-            error!("Could not initialize renderer: {}", err);
-            process::exit(1);
-        })
-    };
+    let mut renderer_state = RendererState::new(backend_state).unwrap_or_else(|err| {
+        error!("Could not initialize renderer: {}", err);
+        process::exit(1);
+    });
     let mut app_state = ApplicationState::default();
 
     loop {
