@@ -6,6 +6,7 @@ use winit::{Event, EventsLoop, WindowEvent};
 pub enum UserInput {
     None,
     TerminationRequested,
+    Resized((f64, f64)),
 }
 
 impl UserInput {
@@ -17,6 +18,12 @@ impl UserInput {
                 ..
             } => {
                 input = Self::TerminationRequested;
+            }
+            Event::WindowEvent {
+                event: WindowEvent::Resized(logical_size),
+                ..
+            } => {
+                input = UserInput::Resized((logical_size.width, logical_size.height));
             }
             _ => (),
         });
