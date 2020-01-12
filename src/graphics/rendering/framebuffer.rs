@@ -5,14 +5,13 @@ use super::{
 };
 use crate::error::{VortekError, VortekResult};
 use gfx_hal::{
-    command::{CommandBuffer, OneShot, Primary},
-    device::Device,
+    device::{Device, OomOrDeviceLost},
     format::{Aspects, Format, Swizzle},
     image::{Extent, SubresourceRange, ViewKind},
     pool::{CommandPool, CommandPoolCreateFlags},
     queue::{QueueFamily, QueueFamilyId},
     window::SwapImageIndex,
-    Backend, Graphics,
+    Backend,
 };
 use std::{cell::RefCell, ops::Drop, rc::Rc};
 
@@ -20,8 +19,8 @@ use std::{cell::RefCell, ops::Drop, rc::Rc};
 pub struct FramebufferState<B: Backend> {
     framebuffers: Option<Vec<B::Framebuffer>>,
     frame_images: Option<Vec<(B::Image, B::ImageView)>>,
-    command_pools: Option<Vec<CommandPool<B, Graphics>>>,
-    command_buffer_lists: Vec<Vec<CommandBuffer<B, Graphics, OneShot, Primary>>>,
+    command_pools: Option<Vec<B::CommandPool>>,
+    command_buffer_lists: Vec<Vec<B::CommandBuffer>>,
     in_flight_fences: Option<Vec<B::Fence>>,
     acquire_semaphores: Option<Vec<B::Semaphore>>,
     present_semaphores: Option<Vec<B::Semaphore>>,
@@ -32,6 +31,11 @@ pub struct FramebufferState<B: Backend> {
 
 impl<B: Backend> FramebufferState<B> {
     /// Creates a new framebuffer state from the given device, render pass and swapchain states.
+    ///
+    /// # Safety
+    /// A potential source of unsafety is the creation of image views
+    /// with an incompatible device and swapchain state, but the safety
+    /// requirements of `Device::create_image_view` are not documented.
     pub unsafe fn new(
         device_state: Rc<RefCell<DeviceState<B>>>,
         swapchain_state: &mut SwapchainState<B>,
@@ -91,10 +95,7 @@ impl<B: Backend> FramebufferState<B> {
     ) -> (
         (
             &mut B::Framebuffer,
-            (
-                &mut CommandPool<B, Graphics>,
-                &mut Vec<CommandBuffer<B, Graphics, OneShot, Primary>>,
-            ),
+            (&mut B::CommandPool, &mut Vec<B::CommandBuffer>),
             &mut B::Fence,
         ),
         (&mut B::Semaphore, &mut B::Semaphore),
@@ -152,10 +153,7 @@ impl<B: Backend> FramebufferState<B> {
     pub fn command_buffer_data(
         &self,
         swap_image_index: SwapImageIndex,
-    ) -> (
-        &CommandPool<B, Graphics>,
-        &[CommandBuffer<B, Graphics, OneShot, Primary>],
-    ) {
+    ) -> (&B::CommandPool, &[B::CommandBuffer]) {
         (
             &self
                 .command_pools
@@ -170,10 +168,7 @@ impl<B: Backend> FramebufferState<B> {
     pub fn command_buffer_data_mut(
         &mut self,
         swap_image_index: SwapImageIndex,
-    ) -> (
-        &mut CommandPool<B, Graphics>,
-        &mut Vec<CommandBuffer<B, Graphics, OneShot, Primary>>,
-    ) {
+    ) -> (&mut B::CommandPool, &mut Vec<B::CommandBuffer>) {
         (
             &mut self
                 .command_pools
@@ -271,7 +266,7 @@ impl<B: Backend> FramebufferState<B> {
     }
 
     /// Creates a framebuffer with the given extent and render pass from each given image view.
-    unsafe fn create_framebuffers(
+    fn create_framebuffers(
         device: &B::Device,
         render_pass: &B::RenderPass,
         extent: &Extent,
@@ -289,7 +284,7 @@ impl<B: Backend> FramebufferState<B> {
 
         image_views
             .iter()
-            .map(|image_view| {
+            .map(|image_view| unsafe {
                 device
                     .create_framebuffer(render_pass, Some(image_view), extent)
                     .map_err(|err| {
@@ -340,14 +335,11 @@ impl<B: Backend> FramebufferState<B> {
         device: &B::Device,
         queue_family_id: QueueFamilyId,
         number: usize,
-    ) -> VortekResult<(
-        Vec<CommandPool<B, Graphics>>,
-        Vec<Vec<CommandBuffer<B, Graphics, OneShot, Primary>>>,
-    )> {
+    ) -> VortekResult<(Vec<B::CommandPool>, Vec<Vec<B::CommandBuffer>>)> {
         let mut command_pools = Vec::with_capacity(number);
         let mut command_buffer_lists = Vec::with_capacity(number);
         for _ in 0..number {
-            command_pools.push(CommandPool::<B, Graphics>::new(
+            command_pools.push(
                 device
                     .create_command_pool(queue_family_id, CommandPoolCreateFlags::RESET_INDIVIDUAL)
                     .map_err(|err| {
@@ -356,7 +348,7 @@ impl<B: Backend> FramebufferState<B> {
                             err,
                         ))
                     })?,
-            ));
+            );
 
             command_buffer_lists.push(Vec::new());
         }
@@ -376,7 +368,16 @@ impl<B: Backend> Drop for FramebufferState<B> {
             {
                 device
                     .wait_for_fence(&fence, std::u64::MAX)
-                    .unwrap_or_else(|err| panic!("Could not wait for in-flight fence: {}", err));
+                    .unwrap_or_else(|oom_or_device_lost| match oom_or_device_lost {
+                        OomOrDeviceLost::OutOfMemory(out_of_memory_err) => panic!(
+                            "Could not wait for in-flight fence (out of memory): {}",
+                            out_of_memory_err
+                        ),
+                        OomOrDeviceLost::DeviceLost(device_lost_err) => panic!(
+                            "Could not wait for in-flight fence (device lost): {}",
+                            device_lost_err
+                        ),
+                    });
                 device.destroy_fence(fence);
             }
 
@@ -388,7 +389,7 @@ impl<B: Backend> Drop for FramebufferState<B> {
                 .zip(self.command_buffer_lists.drain(..))
             {
                 command_pool.free(command_buffer_list);
-                device.destroy_command_pool(command_pool.into_raw());
+                device.destroy_command_pool(command_pool);
             }
 
             for acquire_semaphore in self

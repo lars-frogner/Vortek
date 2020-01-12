@@ -3,10 +3,10 @@
 use super::RenderingError;
 use crate::error::{VortekError, VortekResult};
 use gfx_hal::{
-    adapter::{Adapter, PhysicalDevice},
-    queue::{QueueFamily, QueueGroup, Queues},
+    adapter::{Adapter, Gpu, PhysicalDevice},
+    queue::{QueueFamily, QueueGroup},
     window::Surface,
-    Backend, Features, Gpu, Graphics,
+    Backend, Features,
 };
 use log::debug;
 
@@ -15,7 +15,7 @@ pub struct DeviceState<B: Backend> {
     device: B::Device,
     physical_device: B::PhysicalDevice,
     queue_family: B::QueueFamily,
-    queue_group: QueueGroup<B, Graphics>,
+    queue_group: QueueGroup<B>,
 }
 
 impl<B: Backend> DeviceState<B> {
@@ -30,10 +30,12 @@ impl<B: Backend> DeviceState<B> {
 
         let queue_family = Self::take_queue_family(queue_families, surface)?;
 
-        let Gpu { device, queues } =
-            unsafe { Self::create_logical_device(&physical_device, &queue_family)? };
+        let Gpu {
+            device,
+            queue_groups,
+        } = unsafe { Self::create_logical_device(&physical_device, &queue_family)? };
 
-        let queue_group = Self::take_queue_group(queues, &queue_family)?;
+        let queue_group = Self::take_queue_group(queue_groups, &queue_family)?;
 
         Ok(Self {
             device,
@@ -59,12 +61,12 @@ impl<B: Backend> DeviceState<B> {
     }
 
     /// Returns a reference to the queue group held by the device state.
-    pub fn queue_group(&self) -> &QueueGroup<B, Graphics> {
+    pub fn queue_group(&self) -> &QueueGroup<B> {
         &self.queue_group
     }
 
     /// Returns a mutable reference to the queue group held by the device state.
-    pub fn queue_group_mut(&mut self) -> &mut QueueGroup<B, Graphics> {
+    pub fn queue_group_mut(&mut self) -> &mut QueueGroup<B> {
         &mut self.queue_group
     }
 
@@ -76,7 +78,9 @@ impl<B: Backend> DeviceState<B> {
     ) -> VortekResult<<B as Backend>::QueueFamily> {
         queue_families
             .into_iter()
-            .find(|family| family.supports_graphics() && surface.supports_queue_family(family))
+            .find(|family| {
+                family.queue_type().supports_graphics() && surface.supports_queue_family(family)
+            })
             .ok_or_else(|| {
                 VortekError::RenderingError(RenderingError::from_str(
                     "Could not find supported queue family with graphics.",
@@ -103,18 +107,20 @@ impl<B: Backend> DeviceState<B> {
             })
     }
 
-    /// Takes and returns the queue group of the given family from the given list
-    /// of queues associated with a logical device.
+    /// Takes and returns the first available queue group of the given family
+    /// from the given list of queue groups associated with a logical device.
     fn take_queue_group(
-        mut queues: Queues<B>,
+        queue_groups: Vec<QueueGroup<B>>,
         queue_family: &<B as Backend>::QueueFamily,
-    ) -> VortekResult<QueueGroup<B, Graphics>> {
-        let queue_group = queues.take::<Graphics>(queue_family.id()).ok_or_else(|| {
-            VortekError::RenderingError(RenderingError::from_str(
-                "Could not take ownership of queue group.",
-            ))
-        })?;
-
+    ) -> VortekResult<QueueGroup<B>> {
+        let queue_group = queue_groups
+            .into_iter()
+            .find(|queue_group| queue_group.family == queue_family.id())
+            .ok_or_else(|| {
+                VortekError::RenderingError(RenderingError::from_str(
+                    "Could not take ownership of queue group.",
+                ))
+            })?;
         if queue_group.queues.is_empty() {
             Err(VortekError::RenderingError(RenderingError::from_str(
                 "Queue group did not have any command queues available.",

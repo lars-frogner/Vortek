@@ -5,6 +5,14 @@
 pub struct Color([f32; 4]);
 
 impl Color {
+    pub fn from_components(red: f32, green: f32, blue: f32, alpha: f32) -> Self {
+        Self::from_slice([red, green, blue, alpha])
+    }
+
+    pub fn from_slice(components: [f32; 4]) -> Self {
+        Self(components)
+    }
+
     /// Creates a black color.
     pub fn black() -> Self {
         Self([0.0, 0.0, 0.0, 1.0])

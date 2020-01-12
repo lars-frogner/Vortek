@@ -9,7 +9,7 @@ use gfx_hal::{
     format::{ChannelType, Format},
     image::{Extent, Usage},
     window::{
-        CompositeAlpha, Extent2D, PresentMode, Surface, SurfaceCapabilities, SwapchainConfig,
+        CompositeAlphaMode, Extent2D, PresentMode, Surface, SurfaceCapabilities, SwapchainConfig,
     },
     Backend,
 };
@@ -31,16 +31,19 @@ impl<B: Backend> SwapchainState<B> {
         device_state: Rc<RefCell<DeviceState<B>>>,
         backend_state: &mut BackendState<B>,
     ) -> VortekResult<Self> {
-        let (capabilities, preferred_formats, present_modes) = backend_state
+        let capabilities = backend_state
             .surface()
-            .compatibility(device_state.borrow().physical_device());
-        debug!("Surface capabilities: {:?}", capabilities);
-        debug!("Preferred formats: {:?}", preferred_formats);
-        debug!("Present modes: {:?}", present_modes);
+            .capabilities(device_state.borrow().physical_device());
+        let supported_formats = backend_state
+            .surface()
+            .supported_formats(device_state.borrow().physical_device());
 
-        let present_mode = Self::select_present_mode(&present_modes)?;
-        let composite_alpha = Self::select_composite_alpha(&capabilities)?;
-        let format = Self::select_format(preferred_formats.as_ref())?;
+        debug!("Surface capabilities: {:?}", capabilities);
+        debug!("Supported formats: {:?}", supported_formats);
+
+        let present_mode = Self::select_present_mode(&capabilities)?;
+        let composite_alpha_mode = Self::select_composite_alpha_mode(&capabilities)?;
+        let format = Self::select_format(supported_formats.as_ref())?;
         let extent = Self::determine_extent(backend_state.window_state(), &capabilities)?;
         let image_count = Self::compute_image_count(&capabilities, present_mode);
         let image_layers = 1;
@@ -48,7 +51,7 @@ impl<B: Backend> SwapchainState<B> {
 
         let swapchain_config = SwapchainConfig {
             present_mode,
-            composite_alpha,
+            composite_alpha_mode,
             format,
             extent,
             image_count,
@@ -114,35 +117,39 @@ impl<B: Backend> SwapchainState<B> {
             .expect("No backbuffer in swapchain state.")
     }
 
-    /// Selects the preferred present mode for the given list of available present
-    /// modes.
-    fn select_present_mode(present_modes: &[PresentMode]) -> VortekResult<PresentMode> {
+    /// Selects the preferred present mode from the given surface capabilities.
+    fn select_present_mode(capabilities: &SurfaceCapabilities) -> VortekResult<PresentMode> {
         [
-            PresentMode::Mailbox,
-            PresentMode::Fifo,
-            PresentMode::Relaxed,
-            PresentMode::Immediate,
+            PresentMode::MAILBOX,
+            PresentMode::FIFO,
+            PresentMode::RELAXED,
+            PresentMode::IMMEDIATE,
         ]
         .iter()
         .cloned()
-        .find(|present_mode| present_modes.contains(present_mode))
+        .find(|&present_mode| capabilities.present_modes.contains(present_mode))
         .ok_or_else(|| {
             VortekError::RenderingError(RenderingError::from_str("No present modes specified."))
         })
     }
 
-    /// Selects the preferred composite alpha mode for the given list of available
-    /// composite alpha modes.
-    fn select_composite_alpha(capabilities: &SurfaceCapabilities) -> VortekResult<CompositeAlpha> {
+    /// Selects the preferred composite alpha mode from the given surface capabilities.
+    fn select_composite_alpha_mode(
+        capabilities: &SurfaceCapabilities,
+    ) -> VortekResult<CompositeAlphaMode> {
         [
-            CompositeAlpha::OPAQUE,
-            CompositeAlpha::INHERIT,
-            CompositeAlpha::PREMULTIPLIED,
-            CompositeAlpha::POSTMULTIPLIED,
+            CompositeAlphaMode::OPAQUE,
+            CompositeAlphaMode::INHERIT,
+            CompositeAlphaMode::PREMULTIPLIED,
+            CompositeAlphaMode::POSTMULTIPLIED,
         ]
         .iter()
         .cloned()
-        .find(|&composite_alpha| capabilities.composite_alpha.contains(composite_alpha))
+        .find(|&composite_alpha_mode| {
+            capabilities
+                .composite_alpha_modes
+                .contains(composite_alpha_mode)
+        })
         .ok_or_else(|| {
             VortekError::RenderingError(RenderingError::from_str(
                 "No composite alpha modes specified.",
@@ -150,10 +157,10 @@ impl<B: Backend> SwapchainState<B> {
         })
     }
 
-    /// Tries to select an SRGB format from the given list of preferred formats,
+    /// Tries to select an SRGB format from the given list of supported formats,
     /// or falls back to the first format in the list.
-    fn select_format(preferred_formats: Option<&Vec<Format>>) -> VortekResult<Format> {
-        preferred_formats.map_or(Ok(Format::Rgba8Srgb), |formats| {
+    fn select_format(supported_formats: Option<&Vec<Format>>) -> VortekResult<Format> {
+        supported_formats.map_or(Ok(Format::Rgba8Srgb), |formats| {
             match formats
                 .iter()
                 .find(|format| format.base_format().1 == ChannelType::Srgb)
@@ -162,7 +169,7 @@ impl<B: Backend> SwapchainState<B> {
                 Some(srgb_format) => Ok(srgb_format),
                 None => formats.get(0).cloned().ok_or_else(|| {
                     VortekError::RenderingError(RenderingError::from_str(
-                        "Preferred format list was empty.",
+                        "Supported format list was empty.",
                     ))
                 }),
             }
@@ -175,7 +182,7 @@ impl<B: Backend> SwapchainState<B> {
         window_state: &WindowState,
         capabilities: &SurfaceCapabilities,
     ) -> VortekResult<Extent2D> {
-        let (window_width, window_height) = window_state.compute_physical_size()?.into();
+        let (window_width, window_height) = window_state.inner_physical_size().into();
 
         Ok(capabilities.current_extent.unwrap_or_else(|| {
             let (min_width, max_width) = (
@@ -201,7 +208,7 @@ impl<B: Backend> SwapchainState<B> {
             *capabilities.image_count.end(),
             cmp::max(
                 *capabilities.image_count.start(),
-                if present_mode == PresentMode::Mailbox {
+                if present_mode == PresentMode::MAILBOX {
                     3
                 } else {
                     2

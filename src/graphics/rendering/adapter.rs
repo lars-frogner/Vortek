@@ -31,7 +31,8 @@ impl<B: Backend> AdapterState<B> {
             .into_iter()
             .find(|adapter| {
                 adapter.queue_families.iter().any(|queue_family| {
-                    queue_family.supports_graphics() && surface.supports_queue_family(queue_family)
+                    queue_family.queue_type().supports_graphics()
+                        && surface.supports_queue_family(queue_family)
                 })
             })
             .ok_or_else(|| {

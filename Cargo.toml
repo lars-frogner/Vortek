@@ -11,22 +11,21 @@ dx12 = ["gfx-backend-dx12"]
 vulkan = ["gfx-backend-vulkan"]
 
 [dependencies]
-winit = "0.19"
-gfx-hal = "0.3.1"
+winit = "0.20"
+gfx-hal = "0.4"
 log = "0.4.8"
-simple_logger = "1.3.0"
+simple_logger = "1.4.0"
 arrayvec = "0.5.1"
 
 [dependencies.gfx-backend-vulkan]
-version = "0.3"
+version = "0.4"
 features = ["x11"]
 optional = true
 
 [target.'cfg(target_os = "macos")'.dependencies.gfx-backend-metal]
-version = "0.3"
-features = ["winit"]
+version = "0.4"
 optional = true
 
 [target.'cfg(windows)'.dependencies.gfx-backend-dx12]
-version = "0.3"
+version = "0.4"
 optional = true

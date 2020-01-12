@@ -6,6 +6,7 @@ use gfx_hal::{
     device::Device,
     format::Format,
     image::{Access, Layout},
+    memory::Dependencies,
     pass::{
         Attachment, AttachmentLoadOp, AttachmentOps, AttachmentStoreOp, SubpassDependency,
         SubpassDesc, SubpassRef,
@@ -23,7 +24,7 @@ pub struct RenderPassState<B: Backend> {
 
 impl<B: Backend> RenderPassState<B> {
     /// Creates a new render pass state from the given swapchain and device states.
-    pub unsafe fn new(
+    pub fn new(
         device_state: Rc<RefCell<DeviceState<B>>>,
         swapchain_state: &SwapchainState<B>,
     ) -> VortekResult<Self> {
@@ -32,20 +33,22 @@ impl<B: Backend> RenderPassState<B> {
             let subpass_description = Self::create_subpass_description();
             let subpass_dependency = Self::create_subpass_dependency();
 
-            device_state
-                .borrow()
-                .device()
-                .create_render_pass(
-                    &[attachement],
-                    &[subpass_description],
-                    &[subpass_dependency],
-                )
-                .map_err(|err| {
-                    VortekError::RenderingError(RenderingError::from_error(
-                        "Could not create render pass: ",
-                        err,
-                    ))
-                })?
+            unsafe {
+                device_state
+                    .borrow()
+                    .device()
+                    .create_render_pass(
+                        &[attachement],
+                        &[subpass_description],
+                        &[subpass_dependency],
+                    )
+                    .map_err(|err| {
+                        VortekError::RenderingError(RenderingError::from_error(
+                            "Could not create render pass: ",
+                            err,
+                        ))
+                    })?
+            }
         };
 
         Ok(Self {
@@ -96,6 +99,7 @@ impl<B: Backend> RenderPassState<B> {
             stages: PipelineStage::COLOR_ATTACHMENT_OUTPUT..PipelineStage::COLOR_ATTACHMENT_OUTPUT,
             accesses: Access::empty()
                 ..(Access::COLOR_ATTACHMENT_READ | Access::COLOR_ATTACHMENT_WRITE),
+            flags: Dependencies::BY_REGION,
         }
     }
 }

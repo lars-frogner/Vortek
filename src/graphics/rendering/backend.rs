@@ -1,7 +1,7 @@
 //! Backend management.
 
-use super::{super::window::WindowState, adapter::AdapterState};
-use crate::error::VortekResult;
+use super::{super::window::WindowState, adapter::AdapterState, RenderingError};
+use crate::error::{VortekError, VortekResult};
 use gfx_hal::{Backend, Instance};
 
 #[cfg(feature = "dx12")]
@@ -55,12 +55,22 @@ impl<B: Backend> BackendState<B> {
 /// Creates a new backend state from the given window state.
 pub fn create_backend_state(
     window_state: WindowState,
-) -> VortekResult<(
-    BackendState<<backend::Instance as Instance>::Backend>,
-    backend::Instance,
-)> {
-    let instance = backend::Instance::create(window_state.window_title(), 1);
-    let surface = instance.create_surface(window_state.window());
+) -> VortekResult<(BackendState<backend::Backend>, backend::Instance)> {
+    let instance = backend::Instance::create(window_state.window_title(), 1).map_err(|_| {
+        VortekError::RenderingError(RenderingError::from_str(
+            "Could not instantiate backend because it is not supported.",
+        ))
+    })?;
+    let surface = unsafe {
+        instance
+            .create_surface(window_state.window())
+            .map_err(|err| {
+                VortekError::RenderingError(RenderingError::from_error(
+                    "Could not create surface: ",
+                    err,
+                ))
+            })?
+    };
     let adapter_state = AdapterState::new(instance.enumerate_adapters(), &surface)?;
     Ok((
         BackendState {

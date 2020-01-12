@@ -1,32 +1,31 @@
 //! User input.
 
-use winit::{Event, EventsLoop, WindowEvent};
+use winit::event::{Event, WindowEvent};
 
 #[derive(Clone, Debug)]
 pub enum UserInput {
     None,
     TerminationRequested,
-    Resized((f64, f64)),
+    Resized((u32, u32)),
+    CursorMoved((i32, i32)),
 }
 
 impl UserInput {
-    pub fn poll_event_loop(event_loop: &mut EventsLoop) -> Self {
-        let mut input = Self::None;
-        event_loop.poll_events(|event| match event {
+    pub fn from_event(event: Event<()>) -> Self {
+        match event {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
-            } => {
-                input = Self::TerminationRequested;
-            }
+            } => Self::TerminationRequested,
             Event::WindowEvent {
-                event: WindowEvent::Resized(logical_size),
+                event: WindowEvent::Resized(physical_size),
                 ..
-            } => {
-                input = UserInput::Resized((logical_size.width, logical_size.height));
-            }
-            _ => (),
-        });
-        input
+            } => Self::Resized((physical_size.width, physical_size.height)),
+            Event::WindowEvent {
+                event: WindowEvent::CursorMoved { position, .. },
+                ..
+            } => Self::CursorMoved((position.x, position.y)),
+            _ => Self::None,
+        }
     }
 }
