@@ -1,6 +1,6 @@
 //! User input.
 
-use winit::event::{Event, WindowEvent};
+use rendy::init::winit::event::{Event, WindowEvent};
 
 #[derive(Clone, Debug)]
 pub enum UserInput {
